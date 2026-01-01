@@ -16,11 +16,11 @@ logger.setLevel("INFO")
 ssm = boto3.client("ssm", region_name="ap-northeast-1")
 dynamo = boto3.client("dynamodb", region_name="ap-northeast-1")
 rss_urls: dict[str, str] = {
-    "qiita": "https://qiita.com/popular-items/feed",
     "hatena": "http://b.hatena.ne.jp/hotentry/it.rss",
     "zenn": "https://zenn.dev/feed",
-    "codezine": "https://codezine.jp/rss/new/20/index.xml",
     "developersio": "https://dev.classmethod.jp/feed",
+    "codezine": "https://codezine.jp/rss/new/20/index.xml",
+    "qiita": "https://qiita.com/popular-items/feed",
 }
 today = date.today()
 today_jp = f"{today.year}年{today.month}月{today.day}日"
