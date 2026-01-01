@@ -5,15 +5,20 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as ssm from "aws-cdk-lib/aws-ssm";
 import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
+import path from "path";
 
 export class TechNewsNotificationStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const slackWebhook = new ssm.StringParameter(this, "SlackWebhookUrl", {
-      parameterName: "/tech-news-notification/slack/webhook-url",
-      stringValue: "REPLACE_ME",
-    });
+    const slackWebhook =
+      ssm.StringParameter.fromSecureStringParameterAttributes(
+        this,
+        "SlackWebhookUrl",
+        {
+          parameterName: "/tech-news-notification/slack/webhook-url",
+        }
+      );
 
     const dedupTable = new dynamodb.TableV2(this, "SlackNotifyDedup", {
       partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
@@ -23,12 +28,21 @@ export class TechNewsNotificationStack extends cdk.Stack {
 
     const notifyLambda = new lambda.Function(this, "Notifier", {
       runtime: lambda.Runtime.PYTHON_3_13,
-      handler: "src.tech_news_notification.handler",
-      code: lambda.Code.fromAsset("lambda"),
+      handler: "tech_news_notification.handler",
+      code: lambda.Code.fromAsset(path.join(__dirname, "../lambda"), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          command: [
+            "bash",
+            "-c",
+            "pip install -r requirements.txt -t /asset-output && cp -au . /asset-output",
+          ],
+        },
+      }),
       timeout: cdk.Duration.seconds(30),
       environment: {
         DEDUP_TABLE_NAME: dedupTable.tableName,
-        SLACK_WEBHOOL_PARAM: slackWebhook.parameterName,
+        SLACK_WEBHOOK_PARAM: slackWebhook.parameterName,
       },
     });
 
