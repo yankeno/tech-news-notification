@@ -32,6 +32,10 @@ header: dict[str, Any] = {
         "emoji": True,
     },
 }
+CHANNEL_MENTION_BLOCK: dict[str, Any] = {
+    "type": "section",
+    "text": {"type": "mrkdwn", "text": "<!channel>"},
+}
 DIVIDER: dict[str, Any] = {"type": "divider"}
 SLACK_PARAM = os.environ["SLACK_WEBHOOK_PARAM"]
 DEDUP_TABLE = os.environ["DEDUP_TABLE_NAME"]
@@ -125,6 +129,7 @@ def _build_message(feeds: list[dict]) -> dict:
     # 記事が何もない場合はフォールバックメッセージだけを送信
     if len(blocks) > 0:
         blocks.insert(0, header)
+        blocks.insert(0, CHANNEL_MENTION_BLOCK)
         return {"blocks": blocks}
     else:
         return FALLBACK_MESSAGE
