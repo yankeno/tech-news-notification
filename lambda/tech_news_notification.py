@@ -1,4 +1,6 @@
 import hashlib
+import json
+import logging
 import os
 import posixpath
 from datetime import date, datetime, timedelta, timezone
@@ -9,12 +11,16 @@ import boto3
 import feedparser
 import requests
 
+logger = logging.getLogger()
+logger.setLevel("INFO")
 ssm = boto3.client("ssm", region_name="ap-northeast-1")
 dynamo = boto3.client("dynamodb", region_name="ap-northeast-1")
 rss_urls: dict[str, str] = {
     "qiita": "https://qiita.com/popular-items/feed",
     "hatena": "http://b.hatena.ne.jp/hotentry/it.rss",
     "zenn": "https://zenn.dev/feed",
+    "codezine": "https://codezine.jp/rss/new/20/index.xml",
+    "developersio": "https://dev.classmethod.jp/feed",
 }
 today = date.today()
 today_jp = f"{today.year}年{today.month}月{today.day}日"
@@ -30,19 +36,25 @@ DIVIDER: dict[str, Any] = {"type": "divider"}
 SLACK_PARAM = os.environ["SLACK_WEBHOOK_PARAM"]
 DEDUP_TABLE = os.environ["DEDUP_TABLE_NAME"]
 DEDUP_TTL = 3
+MAX_PROCESS_ENTRIES_COUNT = 30
 MAX_ENTRIES_COUNT = 10
 FALLBACK_MESSAGE = {"text": f"{today_jp}の新着記事はありません"}
 ERROR_MESSAGE = {"text": f"{today_jp}の記事取得でエラーが発生しました"}
 
 
 def handler(event, context):
+    logger.info("Starting handler")
+
     try:
         feeds = _get_feeds()
         message = _build_message(feeds)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error occurred: {e}", stack_info=True)
         message = ERROR_MESSAGE
 
     _notify_slack_webhook(message)
+    logger.info("Finished handler")
+
     return {"message": "success"}
 
 
@@ -57,7 +69,11 @@ def _get_feeds() -> list[dict]:
 
 def _parse_feed(url: str) -> dict:
     feed = feedparser.parse(url)
+    logger.info(f"Fetched feed from {url} with {len(feed.entries)} entries")
+
     feed_title: str = feed.feed.get("title")
+    if not feed_title:
+        logger.warning(f"Feed title not found for URL: {url}")
 
     entries = []
     for entry in feed.entries:
@@ -74,9 +90,12 @@ def _build_message(feeds: list[dict]) -> dict:
 
     for feed in feeds:
         text = f"*{feed.get('feed_title')}*\n"
-        entries = []
+        entries = []  # メッセージに含める記事一覧
+        processing_target_entries = feed.get("entries", [])[
+            :MAX_PROCESS_ENTRIES_COUNT
+        ]  # 処理対象にする記事一覧
 
-        for entry in feed.get("entries", []):
+        for entry in processing_target_entries:
             url = entry.get("link", "")
             if not _is_valid_url(url):
                 continue
@@ -121,6 +140,7 @@ def _is_valid_url(url: str) -> bool:
             ]
         )
     except Exception:
+        logger.warning(f"Invalid URL: {url}")
         return False
 
 
@@ -173,15 +193,30 @@ def _is_already_registered(item: dict) -> bool:
         )
         return False
     except dynamo.exceptions.ConditionalCheckFailedException:
+        logger.info(f"Duplicate URL found: {item['url']['S']}")
         return True
+    except Exception as e:
+        logger.error(f"Error during DynamoDB operation: {e}", stack_info=True)
+        raise
 
 
 def _get_slack_webhook_url() -> str:
-    resnponse = ssm.get_parameter(Name=SLACK_PARAM, WithDecryption=True)
-    return resnponse["Parameter"]["Value"]
+    try:
+        response = ssm.get_parameter(Name=SLACK_PARAM, WithDecryption=True)
+        return response["Parameter"]["Value"]
+    except Exception as e:
+        logger.error(f"Error fetching {SLACK_PARAM} from SSM: {e}", stack_info=True)
+        raise
 
 
 def _notify_slack_webhook(message: dict) -> None:
     url = _get_slack_webhook_url()
-    r = requests.post(url, json=message, timeout=5)
-    r.raise_for_status()
+
+    try:
+        logger.info(f"Sending notification to Slack webhook: {json.dumps(message)}")
+        r = requests.post(url, json=message, timeout=5)
+        r.raise_for_status()
+        logger.info(f"Notification sent to Slack successfully: {r.text}")
+    except requests.RequestException as e:
+        logger.error(f"Error sending notification to Slack: {e}", stack_info=True)
+        raise
