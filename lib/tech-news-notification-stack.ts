@@ -17,7 +17,7 @@ export class TechNewsNotificationStack extends cdk.Stack {
         "SlackWebhookUrl",
         {
           parameterName: "/tech-news-notification/slack/webhook-url",
-        }
+        },
       );
 
     const dedupTable = new dynamodb.TableV2(this, "SlackNotifyDedup", {
@@ -47,6 +47,7 @@ export class TechNewsNotificationStack extends cdk.Stack {
     });
 
     new events.Rule(this, "DailyTechNewsNotificationRule", {
+      enabled: false, // 再開する場合はtrueに変更
       schedule: events.Schedule.cron({
         minute: "0",
         hour: "0", // UTCで00：00 -> JSTで09：00
